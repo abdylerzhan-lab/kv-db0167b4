@@ -1,4 +1,5 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><style>html,body{margin:0}[hidden]{display:none!important}</style></head><body><title>Квартира Эржана</title>
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><style>html,body{margin:0}[hidden]{display:none!important}</style></head><body><meta charset="utf-8">
+<title>Квартира Эржана</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap">
 <style>
@@ -50,7 +51,12 @@ canvas { display: block; touch-action: none; }
 #loading .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
 #loading p { margin: 0; font-size: 14px; }
 #loading small { display: block; margin-top: 6px; color: var(--muted); font-family: var(--font-data); }
-@media (max-width: 560px) { .hint { display: none; } }
+.modes { display: flex; gap: 4px; background: var(--panel); backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 999px; padding: 4px; pointer-events: auto; flex: 0 0 auto; }
+.modes button { font: 600 13px var(--font-ui); color: var(--fg); background: transparent; border: 0; border-radius: 999px; padding: 8px 12px; cursor: pointer; }
+.modes button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+.modes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#tip { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--fg); max-width: calc(100% - 32px); text-align: center; pointer-events: none; transition: opacity .4s; }
+@media (max-width: 560px) { .title p { display: none; } }
 @media (prefers-reduced-motion: reduce) { #loading .bar i { transition: none; } }
 </style>
 
@@ -61,9 +67,10 @@ canvas { display: block; touch-action: none; }
     <h1>Квартира Эржана</h1>
     <p>2 комнаты · 68,3 м² + балконы 7,3 м² · потолок 2,70 м</p>
   </div>
-  <div class="hint">Вращай одним пальцем или мышью, двумя — приближай и сдвигай. Потолок убран, чтобы было видно комнаты.</div>
+  <div class="modes" role="group" aria-label="Режим просмотра"><button type="button" id="mode-top" aria-pressed="true">Сверху</button><button type="button" id="mode-walk" aria-pressed="false">Прогулка</button></div>
 </div>
 <nav class="rooms" id="rooms" aria-label="Комнаты"></nav>
+<div id="tip">Тапни комнату внизу — окажешься внутри</div>
 <div id="loading"><div class="box"><p>Загружаю 3D-модель квартиры</p><div class="bar"><i id="bar"></i></div><small id="pct">0%</small></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
@@ -78,15 +85,16 @@ if (!window.THREE || !THREE.GLTFLoader) {
 }
 const { GLTFLoader, OrbitControls, RoomEnvironment } = THREE;
 
-// Комнаты: центр в метрах плана (x — поперёк дома, z — вдоль), площадь с планировки
+// Комнаты: координаты в метрах (x — поперёк дома, z — вдоль, y — высота). walk — где стоять и куда смотреть
+const EYE = 1.6;
 const ROOMS = [
-  { name: "Вся квартира", area: "75,6 м²", t: [3.0, 0, 8.9], eye: [-7.5, 15.5, 8.9] },
-  { name: "Гостиная", area: "19,4 м²", t: [4.3, 0.6, 3.0], eye: [1.0, 7.5, 7.0] },
-  { name: "Кухня", area: "11,6 м²", t: [1.3, 0.6, 3.9], eye: [3.6, 6.5, 7.8] },
-  { name: "Холл", area: "10,4 м²", t: [2.1, 0.6, 7.6], eye: [-1.8, 6.5, 11.0] },
-  { name: "Санузлы", area: "3,0 + 2,1 м²", t: [5.0, 0.6, 7.8], eye: [2.0, 5.5, 10.6] },
-  { name: "Спальня", area: "14,8 м²", t: [4.4, 0.6, 13.8], eye: [0.0, 7.5, 17.2] },
-  { name: "Балкон", area: "3,3 м²", t: [1.3, 0.5, 0.7], eye: [-2.0, 5.0, 3.5] },
+  { name: "Вся квартира", area: "75,6 м²", top: true },
+  { name: "Гостиная", area: "19,4 м²", walk: [[3.0, 0.6], [4.8, 1.0, 5.0]] },
+  { name: "Кухня", area: "11,6 м²", walk: [[2.2, 5.8], [0.3, 1.1, 2.6]] },
+  { name: "Холл", area: "10,4 м²", walk: [[0.4, 6.5], [3.6, 0.9, 9.4]] },
+  { name: "Санузел", area: "3,0 м²", walk: [[4.45, 7.8], [5.6, 0.9, 6.4]] },
+  { name: "Спальня", area: "14,8 м²", walk: [[5.5, 15.8], [3.3, 0.8, 12.6]] },
+  { name: "Балкон", area: "3,3 м²", walk: [[1.3, 1.25], [1.3, 1.2, -0.3]] },
 ];
 
 const stage = document.getElementById("stage");
@@ -107,29 +115,62 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const sun = new THREE.DirectionalLight(0xfff3e2, 1.6);
 sun.position.set(-6, 14, 4);
 scene.add(sun, new THREE.HemisphereLight(0xffffff, 0xd8d2c8, 0.6));
+// потолок — виден только в прогулке
+const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 18.2), new THREE.MeshBasicMaterial({ color: 0xeeedea, side: THREE.DoubleSide }));
+ceiling.rotation.x = Math.PI / 2; ceiling.position.set(2.94, 2.7, 8.81); ceiling.visible = false;
+scene.add(ceiling);
 
 const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 200);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI * 0.49;
-controls.minDistance = 1.2;
-controls.maxDistance = 40;
+controls.dampingFactor = 0.08;
 
-function fitAspect() {
-  // на узком экране отодвигаем камеру, чтобы длинная квартира влезала
-  return window.innerWidth < window.innerHeight ? 1.45 : 1.0;
+let mode = "top", anim = null;
+const floors = [];
+const tip = document.getElementById("tip");
+function showTip(text) { tip.textContent = text; tip.style.opacity = 1; clearTimeout(showTip.t); showTip.t = setTimeout(() => (tip.style.opacity = 0), 4500); }
+
+function setMode(m) {
+  mode = m;
+  document.getElementById("mode-top").setAttribute("aria-pressed", String(m === "top"));
+  document.getElementById("mode-walk").setAttribute("aria-pressed", String(m === "walk"));
+  ceiling.visible = m === "walk";
+  if (m === "top") {
+    camera.fov = 42; controls.enableZoom = true; controls.enablePan = true; controls.rotateSpeed = 0.6;
+    controls.minDistance = 4; controls.maxDistance = 45; controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI * 0.42;
+  } else {
+    // осмотр на месте: точка вращения в 1 см перед глазами
+    camera.fov = 70; controls.enableZoom = false; controls.enablePan = false; controls.rotateSpeed = -0.35;
+    controls.minDistance = 0.01; controls.maxDistance = 0.01; controls.minPolarAngle = Math.PI * 0.2; controls.maxPolarAngle = Math.PI * 0.8;
+  }
+  camera.updateProjectionMatrix();
 }
-let anim = null;
-function go(i, instant = false) {
-  const r = ROOMS[i];
-  const t = new THREE.Vector3(...r.t);
-  const portrait = window.innerWidth < window.innerHeight;
-  // на телефоне общий план смотрим с торца: длинная квартира ложится вдоль экрана
-  const e = (i === 0 && portrait) ? new THREE.Vector3(3.0, 21, 22) : new THREE.Vector3(...r.eye).sub(t).multiplyScalar(i === 0 ? fitAspect() : 1).add(t);
-  document.querySelectorAll("#rooms button").forEach((b, j) => b.setAttribute("aria-pressed", String(j === i)));
+
+function flyTo(pos, target, instant) {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (instant || reduce) { camera.position.copy(e); controls.target.copy(t); controls.update(); return; }
-  anim = { t0: performance.now(), dur: 900, fromP: camera.position.clone(), fromT: controls.target.clone(), toP: e, toT: t };
+  if (instant || reduce) { camera.position.copy(pos); controls.target.copy(target); controls.update(); return; }
+  anim = { t0: performance.now(), dur: 900, fromP: camera.position.clone(), fromT: controls.target.clone(), toP: pos, toT: target };
+}
+function topView(instant) {
+  setMode("top");
+  const portrait = window.innerWidth < window.innerHeight;
+  flyTo(portrait ? new THREE.Vector3(3.0, 21, 22) : new THREE.Vector3(-7.5, 15.5, 8.9), new THREE.Vector3(3.0, 0, 8.9), instant);
+}
+function walkTo(x, z, look, instant) {
+  const wasWalk = mode === "walk";
+  setMode("walk");
+  const pos = new THREE.Vector3(x, EYE, z);
+  let dir;
+  if (look) dir = new THREE.Vector3(look[0], look[1], look[2]).sub(pos);
+  else { dir = camera.getWorldDirection(new THREE.Vector3()); dir.y = Math.min(0, dir.y); }
+  dir.normalize();
+  flyTo(pos, pos.clone().addScaledVector(dir, 0.01), instant || !wasWalk && false);
+}
+function go(i) {
+  const r = ROOMS[i];
+  document.querySelectorAll("#rooms button").forEach((b, j) => b.setAttribute("aria-pressed", String(j === i)));
+  if (r.top) { topView(); showTip("Крути одним пальцем, двумя — приближай. Или выбери комнату"); }
+  else { walkTo(r.walk[0][0], r.walk[0][1], r.walk[1]); showTip("Веди пальцем — осматривайся. Тапни по полу — пойдёшь туда"); }
 }
 
 const nav = document.getElementById("rooms");
@@ -140,7 +181,27 @@ ROOMS.forEach((r, i) => {
   b.addEventListener("click", () => go(i));
   nav.appendChild(b);
 });
-go(0, true);
+document.getElementById("mode-top").addEventListener("click", () => go(0));
+document.getElementById("mode-walk").addEventListener("click", () => go(1));
+topView(true);
+document.querySelectorAll("#rooms button")[0].setAttribute("aria-pressed", "true");
+showTip("Тапни комнату внизу — окажешься внутри");
+
+window.__kv = { names: () => { const a = []; scene.traverse((o) => { if (o.isMesh && a.length < 8) a.push(o.name + " / " + (o.parent && o.parent.name)); }); return a; }, floors: () => floors.length, mode: () => mode, cam: () => camera.position.toArray() };
+// тап по полу в прогулке — идём туда (если палец почти не двигался)
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let down = null;
+renderer.domElement.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+renderer.domElement.addEventListener("pointerup", (e) => {
+  if (!down || mode !== "walk") { down = null; return; }
+  const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
+  down = null;
+  if (moved > 8 || dt > 400 || !floors.length) return;
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(floors, false)[0];
+  if (hit) walkTo(hit.point.x, hit.point.z, null);
+});
 
 // Вся модель (геометрия и фактуры) лежит прямо в странице — ничего не докачивается
 function setProgress(p, label) {
@@ -165,11 +226,13 @@ loadModel().then((gltf) => {
   gltf.scene.traverse((o) => {
     if (o.isMesh && o.material) {
       const m = o.material;
-      if (m.transmission > 0 || /Стекло/.test(m.name)) { m.transparent = true; m.opacity = 0.25; m.transmission = 0; m.depthWrite = false; }
+      if (m.transmission > 0 || (m.name || "").indexOf("Стекло") === 0) { m.transparent = true; m.opacity = 0.25; m.transmission = 0; m.depthWrite = false; }
       if (m.map && m.alphaTest === 0 && m.transparent) m.alphaTest = 0.4;
     }
   });
   scene.add(gltf.scene);
+  const FLOOR = "Пол"; // «Пол» кодами — не зависит от кодировки страницы
+  gltf.scene.traverse((o) => { if (o.isMesh && ((o.name || "").indexOf(FLOOR) === 0 || (o.parent && (o.parent.name || "").indexOf(FLOOR) === 0))) floors.push(o); });
   document.getElementById("loading").hidden = true;
 }).catch((err) => {
   console.error(err);
